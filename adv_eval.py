@@ -4,8 +4,6 @@ import os
 import argparse
 import sys
 # import time
-from ray import tune
-from ray.tune import CLIReporter
 import random
 import yaml
 import numpy as np
