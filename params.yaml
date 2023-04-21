@@ -1,0 +1,17 @@
+seeds:
+  - 1380
+  # - 1637
+  # - 1549
+model_names: 
+  # - Standard
+  - Wang2023Better_WRN-28-10
+
+norm_threads:
+  # - Linf
+  - L2
+#
+dataset_name: cifar10
+
+attack: cw #rreplace with 'autoattack' for auto-attack
+
+results_root_path: /home/jonas/ # a folder path to save the results
