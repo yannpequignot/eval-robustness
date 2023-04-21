@@ -93,52 +93,6 @@ def set_seeds(seed):
     # torch.backends.cudnn.deterministic = True
     # torch.backends.cudnn.enabled = False
 
-
-def test(model,test_dataloader, device=None, verbose=True, attackfn=None, **kwargs):
-  preds = []
-  labels_oneh = []
-  correct = 0
-  model.eval()
-  with torch.no_grad():
-      looper = tqdm(test_dataloader) if verbose else test_dataloader
-      for data in looper:
-          images, labels = data[0].to(device), data[1].to(device)
-          if attackfn is None:
-            pred = model(images)
-          else:
-            with torch.enable_grad():
-              images = attackfn(model, images, **kwargs)
-            pred = model(images)
-          
-          # Get softmax values for net input and resulting class predictions
-          sm = nn.Softmax(dim=1)
-          pred = sm(pred)
-
-          _, predicted_cl = torch.max(pred.data, 1)
-          pred = pred.cpu().detach().numpy()
-
-          # Convert labels to one hot encoding
-          label_oneh = torch.nn.functional.one_hot(labels, num_classes=10)
-          label_oneh = label_oneh.cpu().detach().numpy()
-
-          preds.extend(pred)
-          labels_oneh.extend(label_oneh)
-
-          # Count correctly classified samples for accuracy
-          correct += sum(predicted_cl == labels).item()
-
-  preds = np.array(preds).flatten()
-  labels_oneh = np.array(labels_oneh).flatten()
-
-  total = len(test_dataloader.dataset)
-  correct_perc = correct / total
-  if verbose:
-    print('Accuracy of the network on the {total)} test images: %.2f %%' % (100 * correct_perc))
-    # print(correct_perc)
-  
-  return preds, labels_oneh
-
-
 def run_trial_empty(
     config: dict, params: dict, args: argparse.Namespace, num_gpus: int = 0
 ) -> None:
@@ -184,15 +138,15 @@ def run_trial(
     valid_size = 5000
     train_set, val_set = torch.utils.data.random_split(dataset, [len(dataset)-valid_size, valid_size])
 
-    # train_loader = torch.utils.data.DataLoader(train_set, batch_size=128,
+    # train_loader = torch.utils.data.DataLoader(train_set, batch_size=params['batch_size'],
     #                                         shuffle=True, num_workers=2)
 
-    val_loader = torch.utils.data.DataLoader(val_set, batch_size=128,
+    val_loader = torch.utils.data.DataLoader(val_set, batch_size=params['batch_size'],
                                             shuffle=True, num_workers=2)
 
     test_set = torchvision.datasets.CIFAR10(root='./data', train=False,
                                         download=True, transform=transform)
-    test_loader = torch.utils.data.DataLoader(test_set, batch_size=128,
+    test_loader = torch.utils.data.DataLoader(test_set, batch_size=params['batch_size'],
                                             shuffle=False, num_workers=2)
 
     # x_test, y_test = load_cifar10(n_examples=10000)
