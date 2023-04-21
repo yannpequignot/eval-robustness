@@ -38,18 +38,6 @@ def parse_args(args: list) -> argparse.Namespace:
         "--no-cuda", action="store_true", default=False, help="disables CUDA training"
     )
     parser.add_argument(
-        "--dry-run",
-        action="store_true",
-        default=False,
-        help="quickly check a single pass",
-    )
-    parser.add_argument(
-        "--no-ray",
-        action="store_true",
-        default=False,
-        help="run without ray",
-    )
-    parser.add_argument(
         "--dataset-path",
         default="/home-local2/jongn2.extra.nobkp/data",
         help="the path to the dataset",
