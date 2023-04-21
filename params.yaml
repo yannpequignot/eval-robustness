@@ -12,6 +12,8 @@ norm_threads:
 #
 dataset_name: cifar10
 
+batch_size: 32 # put a value that gpu memory can bear
+
 attack: cw #rreplace with 'autoattack' for auto-attack
 
 results_root_path: /home/jonas/ # a folder path to save the results
