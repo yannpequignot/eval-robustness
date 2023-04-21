@@ -196,25 +196,7 @@ def run_experiment(params: dict, args: argparse.Namespace) -> None:
     use_cuda = not args.no_cuda and torch.cuda.is_available()
     gpus_per_trial = 1 if use_cuda else 0
 
-    if args.no_ray:
-        run_trial(config=config, params=params, args=args, num_gpus=gpus_per_trial)
-    else:
-        reporter = CLIReporter(
-            parameter_columns=["seed", "model_name", "norm_thread"],
-            # metric_columns=["round"],
-        )
-
-        tune.run(
-            tune.with_parameters(
-                run_trial, params=params, args=args, num_gpus=gpus_per_trial
-            ),
-            resources_per_trial={
-                "cpu": args.cpus_per_trial, "gpu": gpus_per_trial},
-            config=config,
-            progress_reporter=reporter,
-            name=args.project_name,
-        )
-
+    run_trial(config=config, params=params, args=args, num_gpus=gpus_per_trial)
 
 def main(args: list) -> None:
     """Parse command line args, load training params, and initiate training.
