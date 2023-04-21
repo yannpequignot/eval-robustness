@@ -1,4 +1,5 @@
-seeds: 1380
+seed: 1380
+
 model_name: Wang2023Better_WRN-28-10 # or Standard
 
 norm_thread: L2 # or Linf
@@ -9,4 +10,4 @@ batch_size: 32 # put a value that gpu memory can bear
 
 attack: cw #rreplace with 'autoattack' for auto-attack
 
-results_root_path: /home/jonas/ # a folder path to save the results
+results_root_path: /home/jongn2 # a folder path to save the results
