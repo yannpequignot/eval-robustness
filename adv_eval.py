@@ -110,15 +110,15 @@ def run_trial(
     """
 
     #
-    norm_thread = config['norm_thread']
-    model_name = config['model_name']
+    norm_thread = params['norm_thread']
+    model_name = params['model_name']
     root= params['results_root_path']
     resultsDirName = f'{root}/{model_name}_{norm_thread}'
     if not os.path.exists(resultsDirName):
         os.makedirs(resultsDirName)
         print("Results directory ", resultsDirName,  " Created ")
  
-    set_seeds(config['seed'])
+    set_seeds(params['seed'])
     # device
     use_cuda = torch.cuda.is_available()
     device = torch.device("cuda" if use_cuda else "cpu")
@@ -151,7 +151,7 @@ def run_trial(
     # x_test, y_test = load_cifar10(n_examples=10000)
 
     #Load Model
-    model = load_model(model_name=config['model_name'], dataset=config['dataset_name'], threat_model=config['norm_thread'])
+    model = load_model(model_name=params['model_name'], dataset=params['dataset_name'], threat_model=params['norm_thread'])
     model = model.to(device)
     model.eval()
 
@@ -159,7 +159,7 @@ def run_trial(
     if params['attack'] =='cw':
         adv_acc = cw_attack(model, test_loader, device)
     else:
-        adv_acc = autoattack(model, test_loader, config['norm_thread'], device)
+        adv_acc = autoattack(model, test_loader, params['norm_thread'], device)
 
     print(f'adv acc: {100*adv_acc:.2f}%')
     with open(resultsDirName+'/result.txt') as f:
@@ -203,17 +203,7 @@ def run_experiment(params: dict, args: argparse.Namespace) -> None:
     :param params: The hyperparameters.
     :param args: The program arguments.
     """
-    config = {
-        "dataset_name": params['dataset_name'],
-        "model_name": tune.grid_search(params["model_names"]),
-        "seed": tune.grid_search(params["seeds"]),
-        "norm_thread": tune.grid_search(params["norm_threads"]),
-    }
-    if args.dry_run:
-        config = {
-            "strategy_name": args.debug_strategy,
-            "seed": 42,
-        }
+    config = {}
 
     use_cuda = not args.no_cuda and torch.cuda.is_available()
     gpus_per_trial = 1 if use_cuda else 0
