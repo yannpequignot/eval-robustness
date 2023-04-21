@@ -118,8 +118,8 @@ def run_trial(
         os.makedirs(resultsDirName)
         print("Results directory ", resultsDirName,  " Created ")
  
-    set_seeds(config['seed'])
-
+    seed = config['seed']
+    set_seeds(seed)
     # device
     use_cuda = torch.cuda.is_available()
     device = torch.device("cuda" if use_cuda else "cpu")
