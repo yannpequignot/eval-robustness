@@ -20,6 +20,8 @@ from tqdm import tqdm
 
 from autoattack import AutoAttack
 
+import matplotlib.pyplot as plt
+import pandas as pd
 
 def parse_args(args: list) -> argparse.Namespace:
     """Parse command line parameters.
@@ -79,12 +81,6 @@ def set_seeds(seed):
     # torch.backends.cudnn.deterministic = True
     # torch.backends.cudnn.enabled = False
 
-def run_trial_empty(
-    config: dict, params: dict, args: argparse.Namespace, num_gpus: int = 0
-) -> None:
-    print("DO NOTHING AND EXIT")
-
-
 def run_trial(
     config: dict, params: dict, args: argparse.Namespace, num_gpus: int = 0
 ) -> None:
@@ -116,84 +112,81 @@ def run_trial(
     model = model.to(device)
     model.eval()
     print("Model Loaded")
+    print(model)
+
     """# Dataset"""
 
     #@title cifar10
-    # Normalize the images by the imagenet mean/std since the nets are pretrained
     transform = transforms.Compose([transforms.ToTensor(),])
-        #  transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])])
-
-    # dataset = torchvision.datasets.CIFAR10(root='./data', train=True,
-    #                                         download=True, transform=transform)
-
-    # valid_size = 5000
-    # train_set, val_set = torch.utils.data.random_split(dataset, [len(dataset)-valid_size, valid_size])
-
-    # # train_loader = torch.utils.data.DataLoader(train_set, batch_size=params['batch_size'],
-    # #                                         shuffle=True, num_workers=2)
-
-    # val_loader = torch.utils.data.DataLoader(val_set, batch_size=params['batch_size'],
-    #                                         shuffle=True, num_workers=1)
-
+  
 
     test_set = torchvision.datasets.CIFAR10(root='./data', train=False,
                                         download=True, transform=transform)
-    batch=1
-    indices=range(len(test_set))
-    batches= [indices[:5000],indices[5000:]]
-    test_set = torch.utils.data.dataset.Subset(test_set,batches[batch])
 
-    test_loader = torch.utils.data.DataLoader(test_set, batch_size=params['batch_size'],
+    adv0=torch.load("results/Wang2023Better_WRN-28-10_L2/adverserial0.pt")
+    adv1=torch.load("results/Wang2023Better_WRN-28-10_L2/adverserial1.pt")
+    adv=torch.cat([adv0,adv1])
+
+    original= torch.stack([transform(img) for img in test_set.data])
+    targets = torch.Tensor(test_set.targets)
+    print(original.shape, adv.shape)
+    my_dataset = torch.utils.data.dataset.TensorDataset(original, adv, targets)
+    test_loader = torch.utils.data.DataLoader(my_dataset, batch_size=params['batch_size'],
                                             shuffle=False, num_workers=1)
 
+    acc, adv_acc, adv_failure, df  = eval(model, test_loader, device)
 
+    df["(Acc,Adv Acc, Adv)"]=df[["Acc", "Adv Acc","Adv"]].apply(tuple, axis=1)
+    df.to_csv(os.path.join(resultsDirName,f'results.csv'))
+    import plotly.express as px
 
+    fig=px.scatter(df,x="Entropy", y="CW norm", color="(Acc,Adv Acc, Adv)")
+    fig.write_html(os.path.join(resultsDirName,f'CW_vs_ENtropy.html'))
 
-    ## 
-    if params['attack'] =='cw':
-        adv_acc, adversarial = cw_attack(model, test_loader, device)
-        torch.save(adversarial, os.path.join(resultsDirName,f"adverserial{batch}.pt"))
-    else:
-        adv_acc = autoattack(model, test_loader, params['norm_thread'], device)
-
+    df_adv=df[df["Adv"]==True]
+    spearman=df_adv[["Entropy","CW norm"]].corr("spearman")
+    print(spearman)
+    print(spearman.iloc[0,1])
     print(f'adv acc: {100*adv_acc:.2f}%')
-    with open(os.path.join(resultsDirName,f'result{batch}.txt'), "w") as f:
-        f.write(f"Adverserial accuracy (batch {batch}): {adv_acc}")
-        f.close()
+    with open(os.path.join(resultsDirName,f'result_all.txt'), "w") as wf:
+        wf.write(f"Accuracy: {acc} \n")
+        wf.write(f"Adverserial accuracy: {adv_acc}\n")
+        wf.write(f"Adverserial failure: {adv_failure}\n")
+        wf.write(f"Spearman correlation Entropy vs CW norm (adverserial only): {spearman.iloc[0,1]}\n")
+        wf.close()
 
-def cw_attack(model, test_loader, device):
-    correct = 0
-    total = 0
-    adv_list = []    
-    for images, labels in tqdm(test_loader):
-        images, labels = images.to(device), labels.to(device)
-        x_adv = carlini_wagner_l2(model, images, n_classes=10, targeted=False).detach()
-        adv_list.append(x_adv.cpu())
+def eval(model, loader, device):
+    correct=0
+    correct_adv=0
+    constant=0
+    # hs=[]
+    # norms=[]
+    total=0
+    df_list=[]
+    for images, adv_images, target in tqdm(loader):
+        images, adv_images, target = images.to(device), adv_images.to(device), target.to(device)
         with torch.no_grad():
-            out_adv = model(x_adv)
+            out = model(images)
+            out_adv = model(adv_images)
+            entropy=torch.special.entr(torch.softmax(out,1)).sum(1)
+            norm = torch.linalg.vector_norm(images.flatten(1) - adv_images.flatten(1),ord=2,dim=1)
+            # print(entropy.shape)
+            # print(norm.shape)
+            # hs.append(entropy.cpu())
+            # norms.append(norm.cpu())
+            _, y = torch.max(out.data, 1)
             _, y_adv = torch.max(out_adv.data, 1)
-            correct += sum(y_adv == labels).item()
-            total += len(y_adv)
-    adversarial=torch.cat(adv_list)
-    return correct / total, adversarial
 
-
-def autoattack(model, test_loader, norm_thread, device):
-    x_test, y_test = [], []
-    i = 0
-    for x, y in test_loader:
-        if i == 0:
-            x_test = x
-            y_test = y
-            i += 1
-        else:
-            x_test = torch.cat((x_test, x), 0)
-            y_test = torch.cat((y_test, y), 0)
-    #
-    adversary = AutoAttack(model, norm=norm_thread, eps=8/255, version='standard')
-    x_adv, y_adv = adversary.run_standard_evaluation(x_test.to(device), y_test.to(device), return_labels=True)
-    return clean_accuracy(y_test, y_adv)
-
+            correct_adv += sum(y_adv == target ).item()
+            constant += sum(y_adv == y ).item()
+            correct += sum(y == target ).item()
+            total += len(y_adv) 
+            acc =(y == target).cpu().numpy()
+            adv_acc =(y_adv == target).cpu().numpy()
+            adv = (y != y_adv).cpu().numpy()
+            df_list+=zip(entropy.cpu().numpy(), norm.cpu().numpy(), acc, adv_acc ,adv )
+    df=pd.DataFrame(df_list, columns=["Entropy", "CW norm", "Acc", "Adv Acc", "Adv"])
+    return correct/total, correct_adv/total, constant/total, df
 
 def run_experiment(params: dict, args: argparse.Namespace) -> None:
     """Run the experiment using Ray Tune.
@@ -207,6 +200,8 @@ def run_experiment(params: dict, args: argparse.Namespace) -> None:
     gpus_per_trial = 1 if use_cuda else 0
 
     run_trial(config=config, params=params, args=args, num_gpus=gpus_per_trial)
+
+
 
 def main(args: list) -> None:
     """Parse command line args, load training params, and initiate training.
