@@ -206,7 +206,7 @@ def eval(model, loader, device):
             total += len(y_adv) 
             acc =(y == target).cpu().numpy()
             adv_acc =(y_adv == target).cpu().numpy()
-            adv = (y != y).cpu().numpy()
+            adv = (y != y_adv).cpu().numpy()
             df_list+=zip(entropy.cpu().numpy(), norm.cpu().numpy(), acc, adv_acc ,adv )
     df=pd.DataFrame(df_list, columns=["Entropy", "CW norm", "Acc", "Adv Acc", "Adv"])
     return correct/total, correct_adv/total, constant/total, df
