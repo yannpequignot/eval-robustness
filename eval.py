@@ -117,29 +117,11 @@ def run_trial(
     """# Dataset"""
 
     #@title cifar10
-    # Normalize the images by the imagenet mean/std since the nets are pretrained
     transform = transforms.Compose([transforms.ToTensor(),])
-        #  transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])])
-
-    # dataset = torchvision.datasets.CIFAR10(root='./data', train=True,
-    #                                         download=True, transform=transform)
-
-    # valid_size = 5000
-    # train_set, val_set = torch.utils.data.random_split(dataset, [len(dataset)-valid_size, valid_size])
-
-    # # train_loader = torch.utils.data.DataLoader(train_set, batch_size=params['batch_size'],
-    # #                                         shuffle=True, num_workers=2)
-
-    # val_loader = torch.utils.data.DataLoader(val_set, batch_size=params['batch_size'],
-    #                                         shuffle=True, num_workers=1)
-
+  
 
     test_set = torchvision.datasets.CIFAR10(root='./data', train=False,
                                         download=True, transform=transform)
-    # batch=1
-    # indices=range(len(test_set))
-    # batches= [indices[:5000],indices[5000:]]
-    # test_set = torch.utils.data.dataset.Subset(test_set,batches[batch])
 
     adv0=torch.load("results/Wang2023Better_WRN-28-10_L2/adverserial0.pt")
     adv1=torch.load("results/Wang2023Better_WRN-28-10_L2/adverserial1.pt")
@@ -161,12 +143,7 @@ def run_trial(
     fig=px.scatter(df,x="Entropy", y="CW norm", color="(Acc,Adv Acc, Adv)")
     fig.write_html(os.path.join(resultsDirName,f'CW_vs_ENtropy.html'))
 
-    # sns.scatter(entropies.numpy(),norms.numpy(), alpha=.7)
-    # plt.xlabel("CW norms")
-    # plt.ylabel("Entropy")
-
-    # plt.savefig(os.path.join(resultsDirName,f'CW_vs_ENtropy.png'), dpi=600)
-    df_adv=df[df["Adv"]==False]
+    df_adv=df[df["Adv"]==True]
     spearman=df_adv[["Entropy","CW norm"]].corr("spearman")
     print(spearman)
     print(spearman.iloc[0,1])
