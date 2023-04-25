@@ -12,4 +12,4 @@ attack: fab #rreplace with 'autoattack' for auto-attack
 
 results_root_path: . # a folder path to save the results
 
-n_batches: 2
+n_batches: 3
