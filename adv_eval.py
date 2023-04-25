@@ -239,6 +239,7 @@ def run_experiment(params: dict, args: argparse.Namespace) -> None:
     else:
         config = {
             "batch_id": tune.grid_search(list(np.arange(params['n_batches']))),
+            "model_name": params['model_name']
         }
         reporter = CLIReporter(
             parameter_columns=["model_name", "batch_id"],
