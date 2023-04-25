@@ -28,4 +28,4 @@ run-lambda:		## Run the experiment on a LambdaStack server (using gpus=0,1 to sp
 		--gpus '"device=$(gpus)"' \
 		-v /home-local2/jongn2.extra.nobkp:/home-local2/jongn2.extra.nobkp \
 		${LATEST} \
-		bash src/run.sh
+		bash run.sh
