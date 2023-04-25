@@ -142,7 +142,7 @@ def run_trial(
 
     test_set = torchvision.datasets.CIFAR10(root='./data', train=False,
                                         download=True, transform=transform)
-    if config.get('batch'):
+    if config.get('batch_id'):
         batch_id=config['batch_id']
         size = len(test_set)//params['n_batches'] + 1 # math.ceil
         indices=np.arange(len(test_set))
