@@ -234,7 +234,7 @@ def run_experiment(params: dict, args: argparse.Namespace) -> None:
 
     use_cuda = not args.no_cuda and torch.cuda.is_available()
     gpus_per_trial = 1 if use_cuda else 0
-    if not params.get('batches'):
+    if not params.get('n_batches'):
        run_trial(config=config, params=params, args=args, num_gpus=gpus_per_trial)
     else:
         config = {
