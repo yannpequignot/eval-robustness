@@ -7,6 +7,7 @@ import sys
 import random
 import yaml
 import numpy as np
+
 import torch
 import torch.nn as nn
 import torchvision
@@ -19,6 +20,8 @@ from cleverhans.torch.attacks.carlini_wagner_l2 import carlini_wagner_l2
 from tqdm import tqdm
 
 from autoattack import AutoAttack
+from ray import tune
+from ray.tune import CLIReporter
 
 
 def parse_args(args: list) -> argparse.Namespace:
@@ -50,6 +53,7 @@ def parse_args(args: list) -> argparse.Namespace:
     parser.add_argument(
         "--project-name",
         help="the name of the Weights and Biases project to save the results",
+        default='evalrobustness',
         # required=True,
         type=str,
     )
@@ -138,10 +142,12 @@ def run_trial(
 
     test_set = torchvision.datasets.CIFAR10(root='./data', train=False,
                                         download=True, transform=transform)
-    batch=1
-    indices=range(len(test_set))
-    batches= [indices[:5000],indices[5000:]]
-    test_set = torch.utils.data.dataset.Subset(test_set,batches[batch])
+    if config.get('batch'):
+        batch=config['batch']
+        indices=range(len(test_set))
+        batches= [indices[:5000],indices[5000:]]
+        test_set = torch.utils.data.dataset.Subset(test_set,batches[batch])
+        print(f'batch {batch}...')
 
     test_loader = torch.utils.data.DataLoader(test_set, batch_size=params['batch_size'],
                                             shuffle=False, num_workers=1)
@@ -194,6 +200,22 @@ def autoattack(model, test_loader, norm_thread, device):
     x_adv, y_adv = adversary.run_standard_evaluation(x_test.to(device), y_test.to(device), return_labels=True)
     return clean_accuracy(y_test, y_adv)
 
+def fab_attack(model, test_loader, norm_thread, device):
+    x_test, y_test = [], []
+    i = 0
+    for x, y in test_loader:
+        if i == 0:
+            x_test = x
+            y_test = y
+            i += 1
+        else:
+            x_test = torch.cat((x_test, x), 0)
+            y_test = torch.cat((y_test, y), 0)
+    #
+    adversary = AutoAttack(model, norm=norm_thread, eps=0.5, version='custom', attacks_to_run=['fab'])
+    x_adv, y_adv = adversary.run_standard_evaluation(x_test.to(device), y_test.to(device), return_labels=True)
+    return clean_accuracy(y_test, y_adv), x_adv
+
 
 def run_experiment(params: dict, args: argparse.Namespace) -> None:
     """Run the experiment using Ray Tune.
@@ -205,8 +227,26 @@ def run_experiment(params: dict, args: argparse.Namespace) -> None:
 
     use_cuda = not args.no_cuda and torch.cuda.is_available()
     gpus_per_trial = 1 if use_cuda else 0
-
-    run_trial(config=config, params=params, args=args, num_gpus=gpus_per_trial)
+    if not params.get('batches'):
+       run_trial(config=config, params=params, args=args, num_gpus=gpus_per_trial)
+    else:
+        config = {
+            "batches": tune.grid_search(params["batch"]),
+        }
+        reporter = CLIReporter(
+            parameter_columns=["model_name", "batch"],
+            # metric_columns=["round"],
+        )
+        tune.run(
+            tune.with_parameters(
+                run_trial, params=params, args=args, num_gpus=gpus_per_trial
+            ),
+            resources_per_trial={
+                "cpu": args.cpus_per_trial, "gpu": gpus_per_trial},
+            config=config,
+            progress_reporter=reporter,
+            name=args.project_name,
+        )
 
 def main(args: list) -> None:
     """Parse command line args, load training params, and initiate training.
