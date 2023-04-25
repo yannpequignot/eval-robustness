@@ -143,11 +143,12 @@ def run_trial(
     test_set = torchvision.datasets.CIFAR10(root='./data', train=False,
                                         download=True, transform=transform)
     if config.get('batch'):
-        batch=config['batch']
-        indices=range(len(test_set))
-        batches= [indices[:5000],indices[5000:]]
-        test_set = torch.utils.data.dataset.Subset(test_set,batches[batch])
-        print(f'batch {batch}...')
+        batch_id=config['batch_id']
+        size = len(test_set)//params['n_batches'] + 1 # math.ceil
+        indices=np.arange(len(test_set))
+        batch_indices = indices[batch_id*size:(batch_id+1)*size]
+        test_set = torch.utils.data.dataset.Subset(test_set,batch_indices)
+        print(f'batch {batch_id} from {batch_indices[0]} to {batch_indices[-1]}...')
 
     test_loader = torch.utils.data.DataLoader(test_set, batch_size=params['batch_size'],
                                             shuffle=False, num_workers=1)
@@ -158,13 +159,20 @@ def run_trial(
     ## 
     if params['attack'] =='cw':
         adv_acc, adversarial = cw_attack(model, test_loader, device)
-        torch.save(adversarial, os.path.join(resultsDirName,f"adverserial{batch}.pt"))
+        torch.save(adversarial, os.path.join(resultsDirName,f"adverserial{batch_id}.pt"))
+
+    elif params['attack'] =='fab':
+        adv_acc, adversarial, y_adversarial = fab_attack(model, test_loader, device)
+        torch.save(adversarial, os.path.join(resultsDirName,f"fab_adverserial{batch_id}.pt"))
+        torch.save(adversarial, os.path.join(resultsDirName,f"fab_y_adverserial{batch_id}.pt"))
     else:
-        adv_acc = autoattack(model, test_loader, params['norm_thread'], device)
+        # adv_acc = autoattack(model, test_loader, params['norm_thread'], device)
+        raise NotImplementedError
+
 
     print(f'adv acc: {100*adv_acc:.2f}%')
-    with open(os.path.join(resultsDirName,f'result{batch}.txt'), "w") as f:
-        f.write(f"Adverserial accuracy (batch {batch}): {adv_acc}")
+    with open(os.path.join(resultsDirName,f'result{batch_id}.txt'), "w") as f:
+        f.write(f"Adverserial accuracy (batch {batch_id}): {adv_acc}")
         f.close()
 
 def cw_attack(model, test_loader, device):
@@ -183,23 +191,6 @@ def cw_attack(model, test_loader, device):
     adversarial=torch.cat(adv_list)
     return correct / total, adversarial
 
-
-def autoattack(model, test_loader, norm_thread, device):
-    x_test, y_test = [], []
-    i = 0
-    for x, y in test_loader:
-        if i == 0:
-            x_test = x
-            y_test = y
-            i += 1
-        else:
-            x_test = torch.cat((x_test, x), 0)
-            y_test = torch.cat((y_test, y), 0)
-    #
-    adversary = AutoAttack(model, norm=norm_thread, eps=8/255, version='standard')
-    x_adv, y_adv = adversary.run_standard_evaluation(x_test.to(device), y_test.to(device), return_labels=True)
-    return clean_accuracy(y_test, y_adv)
-
 def fab_attack(model, test_loader, norm_thread, device):
     x_test, y_test = [], []
     i = 0
@@ -214,7 +205,23 @@ def fab_attack(model, test_loader, norm_thread, device):
     #
     adversary = AutoAttack(model, norm=norm_thread, eps=0.5, version='custom', attacks_to_run=['fab'])
     x_adv, y_adv = adversary.run_standard_evaluation(x_test.to(device), y_test.to(device), return_labels=True)
-    return clean_accuracy(y_test, y_adv), x_adv
+    return clean_accuracy(y_test, y_adv), x_adv, y_adv
+
+# def autoattack(model, test_loader, norm_thread, device):
+#     x_test, y_test = [], []
+#     i = 0
+#     for x, y in test_loader:
+#         if i == 0:
+#             x_test = x
+#             y_test = y
+#             i += 1
+#         else:
+#             x_test = torch.cat((x_test, x), 0)
+#             y_test = torch.cat((y_test, y), 0)
+#     #
+#     adversary = AutoAttack(model, norm=norm_thread, eps=8/255, version='standard')
+    # x_adv, y_adv = adversary.run_standard_evaluation(x_test.to(device), y_test.to(device), return_labels=True)
+    # return clean_accuracy(y_test, y_adv)
 
 
 def run_experiment(params: dict, args: argparse.Namespace) -> None:
@@ -231,10 +238,10 @@ def run_experiment(params: dict, args: argparse.Namespace) -> None:
        run_trial(config=config, params=params, args=args, num_gpus=gpus_per_trial)
     else:
         config = {
-            "batch": tune.grid_search(params["batches"]),
+            "batch": tune.grid_search(list(np.arange(params['n_batches']))),
         }
         reporter = CLIReporter(
-            parameter_columns=["model_name", "batch"],
+            parameter_columns=["model_name", "batch_id"],
             # metric_columns=["round"],
         )
         tune.run(
