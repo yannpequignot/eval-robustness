@@ -1,3 +1,5 @@
 #!/bin/bash
 
-python3 adv_eval.py --project-name evalstandardcw
+python3 adv_eval.py \
+    --cpus-per-trial 4 \
+    --project-name evalstandardcw
