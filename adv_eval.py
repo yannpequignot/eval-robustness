@@ -162,7 +162,7 @@ def run_trial(
         torch.save(adversarial, os.path.join(resultsDirName,f"adverserial{batch_id}.pt"))
 
     elif params['attack'] =='fab':
-        adv_acc, adversarial, y_adversarial = fab_attack(model, test_loader, device)
+        adv_acc, adversarial, y_adversarial = fab_attack(model, test_loader, norm_thread, device)
         torch.save(adversarial, os.path.join(resultsDirName,f"fab_adverserial{batch_id}.pt"))
         torch.save(adversarial, os.path.join(resultsDirName,f"fab_y_adverserial{batch_id}.pt"))
     else:
