@@ -238,7 +238,7 @@ def run_experiment(params: dict, args: argparse.Namespace) -> None:
        run_trial(config=config, params=params, args=args, num_gpus=gpus_per_trial)
     else:
         config = {
-            "batch": tune.grid_search(list(np.arange(params['n_batches']))),
+            "batch_id": tune.grid_search(list(np.arange(params['n_batches']))),
         }
         reporter = CLIReporter(
             parameter_columns=["model_name", "batch_id"],
