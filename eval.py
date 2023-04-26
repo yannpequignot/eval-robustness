@@ -123,8 +123,8 @@ def run_trial(
     test_set = torchvision.datasets.CIFAR10(root='./data', train=False,
                                         download=True, transform=transform)
 
-    adv0=torch.load("results/Wang2023Better_WRN-28-10_L2/adverserial0.pt")
-    adv1=torch.load("results/Wang2023Better_WRN-28-10_L2/adverserial1.pt")
+    adv0=torch.load(os.path.join(resultsDirName,"CW_adverserial0.pt"))
+    adv1=torch.load(os.path.join(resultsDirName,"CW_adverserial1.pt"))
     adv=torch.cat([adv0,adv1])
 
     original= torch.stack([transform(img) for img in test_set.data])
@@ -140,7 +140,7 @@ def run_trial(
     df.to_csv(os.path.join(resultsDirName,f'results.csv'))
     import plotly.express as px
 
-    fig=px.scatter(df,x="Entropy", y="CW norm", color="(Acc,Adv Acc, Adv)")
+    fig=px.scatter(df,x="Entropy", y="CW norm", color="(Acc,Adv Acc, Adv)", marginal_x="histogram",marginal_y="histogram",)
     fig.write_html(os.path.join(resultsDirName,f'CW_vs_ENtropy.html'))
 
     df_adv=df[df["Adv"]==True]

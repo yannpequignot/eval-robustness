@@ -152,9 +152,11 @@ def run_trial(
     ## 
     if params['attack'] =='cw':
         adv_acc, adversarial = cw_attack(model, test_loader, device)
-        torch.save(adversarial, os.path.join(resultsDirName,f"adverserial{batch}.pt"))
+        torch.save(adversarial, os.path.join(resultsDirName,f"CW_adverserial{batch}.pt"))
     else:
-        adv_acc = autoattack(model, test_loader, params['norm_thread'], device)
+        adv_acc, adversarial = autoattack(model, test_loader, params['norm_thread'], device)
+        torch.save(adversarial, os.path.join(resultsDirName,f"AA_adverserial{batch}.pt"))
+
 
     print(f'adv acc: {100*adv_acc:.2f}%')
     with open(os.path.join(resultsDirName,f'result{batch}.txt'), "w") as f:
@@ -181,6 +183,7 @@ def cw_attack(model, test_loader, device):
 def autoattack(model, test_loader, norm_thread, device):
     x_test, y_test = [], []
     i = 0
+    adv_list = []    
     for x, y in test_loader:
         if i == 0:
             x_test = x
@@ -192,7 +195,7 @@ def autoattack(model, test_loader, norm_thread, device):
     #
     adversary = AutoAttack(model, norm=norm_thread, eps=8/255, version='standard')
     x_adv, y_adv = adversary.run_standard_evaluation(x_test.to(device), y_test.to(device), return_labels=True)
-    return clean_accuracy(y_test, y_adv)
+    return clean_accuracy(y_test, y_adv), x_adv
 
 
 def run_experiment(params: dict, args: argparse.Namespace) -> None:
