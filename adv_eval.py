@@ -146,7 +146,11 @@ def run_trial(
         batch_id=config['batch_id']
         size = len(test_set)//params['n_batches'] + 1 # math.ceil
         indices=np.arange(len(test_set))
-        batch_indices = indices[batch_id*size:(batch_id+1)*size]
+        if params['id_to_run'] < 0: #run all mode
+            batch_indices = indices[batch_id*size:(batch_id+1)*size]
+        else:
+            size1 = size//params['n_batches'] + 1
+            batch_indices = indices[:size][batch_id*size1:(batch_id+1)*size1]
         test_set = torch.utils.data.dataset.Subset(test_set,batch_indices)
         print(f'batch {batch_id} from {batch_indices[0]} to {batch_indices[-1]}...')
 

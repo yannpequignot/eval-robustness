@@ -13,3 +13,5 @@ attack: fab #rreplace with 'autoattack' for auto-attack
 results_root_path: . # a folder path to save the results
 
 n_batches: 3
+
+id_to_run: 0 #-1 (<0) if run all batches
