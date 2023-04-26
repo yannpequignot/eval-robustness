@@ -23,6 +23,8 @@ from autoattack import AutoAttack
 from ray import tune
 from ray.tune import CLIReporter
 
+from pretrained.resnet import resnet18, resnet50
+
 
 def parse_args(args: list) -> argparse.Namespace:
     """Parse command line parameters.
@@ -116,7 +118,12 @@ def run_trial(
 
     """ MODEL """
     #Load Model
-    model = load_model(model_name=params['model_name'], dataset=params['dataset_name'], threat_model=params['norm_thread'])
+    if model_name.lower() == 'resnet18':
+        model = resnet18(pretrained=True)
+    elif model_name.lower() == 'resnet50':
+        model = resnet50(pretrained=True)
+    else:
+        model = load_model(model_name=params['model_name'], dataset=params['dataset_name'], threat_model=params['norm_thread'])
     model = model.to(device)
     model.eval()
     print("Model Loaded")
@@ -124,8 +131,17 @@ def run_trial(
 
     #@title cifar10
     # Normalize the images by the imagenet mean/std since the nets are pretrained
-    transform = transforms.Compose([transforms.ToTensor(),])
-        #  transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])])
+    if model_name.lower().startswith('resnet'):
+         data_normalize = transforms.Normalize(mean = [0.4914, 0.4822, 0.4465], std = [0.2471, 0.2435, 0.2616])
+         transform = transforms.Compose([transforms.ToTensor(), data_normalize])
+         zeros = torch.zeros((3,32,32))
+         ones = torch.ones_like(zeros)
+         minpixel = data_normalize(zeros).min().item()
+         maxpixel = data_normalize(ones).max().item() 
+    else:
+        transform = transforms.Compose([transforms.ToTensor(),])
+        minpixel = 0.
+        maxpixel = 1.
 
     # dataset = torchvision.datasets.CIFAR10(root='./data', train=True,
     #                                         download=True, transform=transform)
@@ -167,30 +183,30 @@ def run_trial(
 
     ## 
     if params['attack'] =='cw':
-        adv_acc, adversarial = cw_attack(model, test_loader, device)
-        torch.save(adversarial, os.path.join(resultsDirName,f"adverserial{save_tag}.pt"))
+        adv_acc, adversarial = cw_attack(model, test_loader, device,minpixel=minpixel, maxpixel=maxpixel)
+        torch.save(adversarial, os.path.join(resultsDirName,f'adverserial{save_tag}.pt'))
 
     elif params['attack'] =='fab':
         adv_acc, adversarial, y_adversarial = fab_attack(model, test_loader, norm_thread, device)
-        torch.save(adversarial, os.path.join(resultsDirName,f"fab_adverserial{save_tag}.pt"))
-        torch.save(adversarial, os.path.join(resultsDirName,f"fab_y_adverserial{save_tag}.pt"))
+        torch.save(adversarial, os.path.join(resultsDirName,f'fab_adverserial{save_tag}.pt'))
+        torch.save(adversarial, os.path.join(resultsDirName,f'fab_y_adverserial{save_tag}.pt'))
     else:
         # adv_acc = autoattack(model, test_loader, params['norm_thread'], device)
         raise NotImplementedError
 
 
     print(f'adv acc: {100*adv_acc:.2f}%')
-    with open(os.path.join(resultsDirName,f'result{batch_id}.txt'), "w") as f:
-        f.write(f"Adverserial accuracy (batch {batch_id}): {adv_acc}")
+    with open(os.path.join(resultsDirName,f'result{save_tag}.txt'), "w") as f:
+        f.write(f"Adverserial accuracy (batch {save_tag}): {adv_acc}")
         f.close()
 
-def cw_attack(model, test_loader, device):
+def cw_attack(model, test_loader, device, minpixel=0., maxpixel=1.0):
     correct = 0
     total = 0
     adv_list = []    
     for images, labels in tqdm(test_loader):
         images, labels = images.to(device), labels.to(device)
-        x_adv = carlini_wagner_l2(model, images, n_classes=10, targeted=False).detach()
+        x_adv = carlini_wagner_l2(model, images, n_classes=10, targeted=False,clip_min=minpixel, clip_max=maxpixel).detach()
         adv_list.append(x_adv.cpu())
         with torch.no_grad():
             out_adv = model(x_adv)
