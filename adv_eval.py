@@ -13,7 +13,7 @@ import torch.nn as nn
 import torchvision
 from torchvision import transforms
 
-from robustbench.utils import load_model, clean_accuracy
+from robustbench.utils import load_model
 from cleverhans.torch.attacks.projected_gradient_descent import projected_gradient_descent as pgd
 from cleverhans.torch.attacks.carlini_wagner_l2 import carlini_wagner_l2
 
@@ -203,9 +203,11 @@ def fab_attack(model, test_loader, norm_thread, device):
             x_test = torch.cat((x_test, x), 0)
             y_test = torch.cat((y_test, y), 0)
     #
+    x_test, y_test = x_test.to(device), y_test.to(device)
     adversary = AutoAttack(model, norm=norm_thread, eps=0.5, version='custom', attacks_to_run=['fab'])
-    x_adv, y_adv = adversary.run_standard_evaluation(x_test.to(device), y_test.to(device), return_labels=True)
-    return clean_accuracy(y_test, y_adv), x_adv, y_adv
+    x_adv, y_adv = adversary.run_standard_evaluation(x_test, y_test, return_labels=True)
+    acc = (y_test == y_adv).sum().item() / len(y_test)
+    return acc, x_adv, y_adv
 
 # def autoattack(model, test_loader, norm_thread, device):
 #     x_test, y_test = [], []
