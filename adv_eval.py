@@ -142,17 +142,22 @@ def run_trial(
 
     test_set = torchvision.datasets.CIFAR10(root='./data', train=False,
                                         download=True, transform=transform)
+    save_tag = ''
     if config.get('batch_id'):
         batch_id=config['batch_id']
+        id_to_run=params['id_to_run']
         size = len(test_set)//params['n_batches'] + 1 # math.ceil
         indices=np.arange(len(test_set))
-        if params['id_to_run'] < 0: #run all mode
+        if id_to_run < 0: #run all mode
             batch_indices = indices[batch_id*size:(batch_id+1)*size]
+            save_tag = f'{batch_id}'
         else:
             size1 = size//params['n_batches'] + 1
             batch_indices = indices[:size][batch_id*size1:(batch_id+1)*size1]
+            save_tag = f'{id_to_run}_{batch_id}'
         test_set = torch.utils.data.dataset.Subset(test_set,batch_indices)
         print(f'batch {batch_id} from {batch_indices[0]} to {batch_indices[-1]}...')
+
 
     test_loader = torch.utils.data.DataLoader(test_set, batch_size=params['batch_size'],
                                             shuffle=False, num_workers=1)
@@ -163,12 +168,12 @@ def run_trial(
     ## 
     if params['attack'] =='cw':
         adv_acc, adversarial = cw_attack(model, test_loader, device)
-        torch.save(adversarial, os.path.join(resultsDirName,f"adverserial{batch_id}.pt"))
+        torch.save(adversarial, os.path.join(resultsDirName,f"adverserial{save_tag}.pt"))
 
     elif params['attack'] =='fab':
         adv_acc, adversarial, y_adversarial = fab_attack(model, test_loader, norm_thread, device)
-        torch.save(adversarial, os.path.join(resultsDirName,f"fab_adverserial{batch_id}.pt"))
-        torch.save(adversarial, os.path.join(resultsDirName,f"fab_y_adverserial{batch_id}.pt"))
+        torch.save(adversarial, os.path.join(resultsDirName,f"fab_adverserial{save_tag}.pt"))
+        torch.save(adversarial, os.path.join(resultsDirName,f"fab_y_adverserial{save_tag}.pt"))
     else:
         # adv_acc = autoattack(model, test_loader, params['norm_thread'], device)
         raise NotImplementedError
