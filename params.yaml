@@ -1,6 +1,6 @@
 seed: 1380
 
-model_name: Standard # or Standard|Wang2023Better_WRN-28-10
+model_name: Standard # or Standard|Wang2023Better_WRN-28-10|ResNet50, ResNet18
 
 norm_thread: L2 # or Linf
 
