@@ -16,6 +16,8 @@ from torchvision import transforms
 from robustbench.utils import load_model
 from cleverhans.torch.attacks.projected_gradient_descent import projected_gradient_descent as pgd
 from cleverhans.torch.attacks.carlini_wagner_l2 import carlini_wagner_l2
+from art.estimators.classification.pytorch import PyTorchClassifier
+from art.metrics.metrics import clever_u
 
 from tqdm import tqdm
 
@@ -190,6 +192,9 @@ def run_trial(
         adv_acc, adversarial, y_adversarial = fab_attack(model, test_loader, norm_thread, device)
         torch.save(adversarial, os.path.join(resultsDirName,f'fab_adverserial{save_tag}.pt'))
         torch.save(adversarial, os.path.join(resultsDirName,f'fab_y_adverserial{save_tag}.pt'))
+    elif params['attack'] == 'clever':
+        clever_scores =   clever_scores(model, test_loader,  norm_thread, device, minpixel=minpixel, maxpixel=maxpixel)
+        torch.save(clever_scores, os.path.join(resultsDirName,f'clever_scores{save_tag}.pt'))
     else:
         # adv_acc = autoattack(model, test_loader, params['norm_thread'], device)
         raise NotImplementedError
@@ -233,6 +238,39 @@ def fab_attack(model, test_loader, norm_thread, device):
     x_adv, y_adv = adversary.run_standard_evaluation(x_test, y_test, return_labels=True)
     acc = (y_test == y_adv).sum().item() / len(y_test)
     return acc, x_adv, y_adv
+
+def clever_scores(model, test_loader,  norm_thread, device, minpixel=0., maxpixel=1.0):
+    clever_args={'min_pixel_value':  minpixel,
+                'max_pixel_value': maxpixel,
+                'nb_batches':100,
+                'batch_size':100,
+                'norm':float(norm_thread[1:]), # eg: 'L2'[1:]=2, 'Linf'[1:]=inf
+                'radius':10.,
+                'pool_factor':10}
+    cl_scores = []
+    model.eval()
+    for data in tqdm(test_loader):
+        clever_dis = clever_score_u(model, data[0][0], **clever_args)
+        cl_scores.append(clever_dis)
+    return np.array(cl_scores)
+
+def clever_score_u(model, x, **args):
+    # set_seeds(1884)
+    classifier = PyTorchClassifier(
+    model=model,
+    clip_values=(args['min_pixel_value'], args['max_pixel_value']),
+    loss=None,
+    optimizer=None,
+    input_shape=(1, 32, 32),
+    nb_classes=10,
+    )
+    res = clever_u(classifier, x.numpy(), 
+                    nb_batches=args['nb_batches'], 
+                    batch_size=args['batch_size'], 
+                    radius=args['radius'], 
+                    norm=args['norm'], 
+                    pool_factor=args['pool_factor'], verbose=False)
+    return res
 
 # def autoattack(model, test_loader, norm_thread, device):
 #     x_test, y_test = [], []
