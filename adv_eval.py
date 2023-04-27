@@ -7,18 +7,25 @@ import sys
 import random
 import yaml
 import numpy as np
+
 import torch
 import torch.nn as nn
 import torchvision
 from torchvision import transforms
 
-from robustbench.utils import load_model, clean_accuracy
+from robustbench.utils import load_model
 from cleverhans.torch.attacks.projected_gradient_descent import projected_gradient_descent as pgd
 from cleverhans.torch.attacks.carlini_wagner_l2 import carlini_wagner_l2
+from art.estimators.classification.pytorch import PyTorchClassifier
+from art.metrics.metrics import clever_u
 
 from tqdm import tqdm
 
 from autoattack import AutoAttack
+from ray import tune
+from ray.tune import CLIReporter
+
+from pretrained.resnet import resnet18, resnet50
 
 
 def parse_args(args: list) -> argparse.Namespace:
@@ -50,6 +57,7 @@ def parse_args(args: list) -> argparse.Namespace:
     parser.add_argument(
         "--project-name",
         help="the name of the Weights and Biases project to save the results",
+        default='evalrobustness',
         # required=True,
         type=str,
     )
@@ -112,7 +120,12 @@ def run_trial(
 
     """ MODEL """
     #Load Model
-    model = load_model(model_name=params['model_name'], dataset=params['dataset_name'], threat_model=params['norm_thread'])
+    if model_name.lower() == 'resnet18':
+        model = resnet18(pretrained=True)
+    elif model_name.lower() == 'resnet50':
+        model = resnet50(pretrained=True)
+    else:
+        model = load_model(model_name=params['model_name'], dataset=params['dataset_name'], threat_model=params['norm_thread'])
     model = model.to(device)
     model.eval()
     print("Model Loaded")
@@ -120,8 +133,17 @@ def run_trial(
 
     #@title cifar10
     # Normalize the images by the imagenet mean/std since the nets are pretrained
-    transform = transforms.Compose([transforms.ToTensor(),])
-        #  transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])])
+    if model_name.lower().startswith('resnet'):
+         data_normalize = transforms.Normalize(mean = [0.4914, 0.4822, 0.4465], std = [0.2471, 0.2435, 0.2616])
+         transform = transforms.Compose([transforms.ToTensor(), data_normalize])
+         zeros = torch.zeros((3,32,32))
+         ones = torch.ones_like(zeros)
+         minpixel = data_normalize(zeros).min().item()
+         maxpixel = data_normalize(ones).max().item() 
+    else:
+        transform = transforms.Compose([transforms.ToTensor(),])
+        minpixel = 0.
+        maxpixel = 1.
 
     # dataset = torchvision.datasets.CIFAR10(root='./data', train=True,
     #                                         download=True, transform=transform)
@@ -138,10 +160,22 @@ def run_trial(
 
     test_set = torchvision.datasets.CIFAR10(root='./data', train=False,
                                         download=True, transform=transform)
-    batch=1
-    indices=range(len(test_set))
-    batches= [indices[:5000],indices[5000:]]
-    test_set = torch.utils.data.dataset.Subset(test_set,batches[batch])
+    save_tag = ''
+    if config.get('batch_id'):
+        batch_id=config['batch_id']
+        id_to_run=params['id_to_run']
+        size = len(test_set)//params['n_batches'] + 1 # math.ceil
+        indices=np.arange(len(test_set))
+        if id_to_run < 0: #run all mode
+            batch_indices = indices[batch_id*size:(batch_id+1)*size]
+            save_tag = f'{batch_id}'
+        else:
+            size1 = size//params['n_batches'] + 1
+            batch_indices = indices[:size][batch_id*size1:(batch_id+1)*size1]
+            save_tag = f'{id_to_run}_{batch_id}'
+        test_set = torch.utils.data.dataset.Subset(test_set,batch_indices)
+        print(f'batch {batch_id} from {batch_indices[0]} to {batch_indices[-1]}...')
+
 
     test_loader = torch.utils.data.DataLoader(test_set, batch_size=params['batch_size'],
                                             shuffle=False, num_workers=1)
@@ -151,25 +185,33 @@ def run_trial(
 
     ## 
     if params['attack'] =='cw':
-        adv_acc, adversarial = cw_attack(model, test_loader, device)
-        torch.save(adversarial, os.path.join(resultsDirName,f"CW_adverserial{batch}.pt"))
+        adv_acc, adversarial = cw_attack(model, test_loader, device,minpixel=minpixel, maxpixel=maxpixel)
+        torch.save(adversarial, os.path.join(resultsDirName,f'adverserial{save_tag}.pt'))
+
+    elif params['attack'] =='fab':
+        adv_acc, adversarial, y_adversarial = fab_attack(model, test_loader, norm_thread, device)
+        torch.save(adversarial, os.path.join(resultsDirName,f'fab_adverserial{save_tag}.pt'))
+        torch.save(adversarial, os.path.join(resultsDirName,f'fab_y_adverserial{save_tag}.pt'))
+    elif params['attack'] == 'clever':
+        clever_scores =   clever_scores(model, test_loader,  norm_thread, device, minpixel=minpixel, maxpixel=maxpixel)
+        torch.save(clever_scores, os.path.join(resultsDirName,f'clever_scores{save_tag}.pt'))
     else:
-        adv_acc, adversarial = autoattack(model, test_loader, params['norm_thread'], device)
-        torch.save(adversarial, os.path.join(resultsDirName,f"AA_adverserial{batch}.pt"))
+        # adv_acc = autoattack(model, test_loader, params['norm_thread'], device)
+        raise NotImplementedError
 
 
     print(f'adv acc: {100*adv_acc:.2f}%')
-    with open(os.path.join(resultsDirName,f'result{batch}.txt'), "w") as f:
-        f.write(f"Adverserial accuracy (batch {batch}): {adv_acc}")
+    with open(os.path.join(resultsDirName,f'result{save_tag}.txt'), "w") as f:
+        f.write(f"Adverserial accuracy (batch {save_tag}): {adv_acc}")
         f.close()
 
-def cw_attack(model, test_loader, device):
+def cw_attack(model, test_loader, device, minpixel=0., maxpixel=1.0):
     correct = 0
     total = 0
     adv_list = []    
     for images, labels in tqdm(test_loader):
         images, labels = images.to(device), labels.to(device)
-        x_adv = carlini_wagner_l2(model, images, n_classes=10, targeted=False).detach()
+        x_adv = carlini_wagner_l2(model, images, n_classes=10, targeted=False,clip_min=minpixel, clip_max=maxpixel).detach()
         adv_list.append(x_adv.cpu())
         with torch.no_grad():
             out_adv = model(x_adv)
@@ -179,8 +221,7 @@ def cw_attack(model, test_loader, device):
     adversarial=torch.cat(adv_list)
     return correct / total, adversarial
 
-
-def autoattack(model, test_loader, norm_thread, device):
+def fab_attack(model, test_loader, norm_thread, device):
     x_test, y_test = [], []
     i = 0
     adv_list = []    
@@ -193,9 +234,60 @@ def autoattack(model, test_loader, norm_thread, device):
             x_test = torch.cat((x_test, x), 0)
             y_test = torch.cat((y_test, y), 0)
     #
-    adversary = AutoAttack(model, norm=norm_thread, eps=8/255, version='standard')
-    x_adv, y_adv = adversary.run_standard_evaluation(x_test.to(device), y_test.to(device), return_labels=True)
-    return clean_accuracy(y_test, y_adv), x_adv
+    x_test, y_test = x_test.to(device), y_test.to(device)
+    adversary = AutoAttack(model, norm=norm_thread, eps=0.5, version='custom', attacks_to_run=['fab'])
+    x_adv, y_adv = adversary.run_standard_evaluation(x_test, y_test, return_labels=True)
+    acc = (y_test == y_adv).sum().item() / len(y_test)
+    return acc, x_adv, y_adv
+
+def clever_scores(model, test_loader,  norm_thread, device, minpixel=0., maxpixel=1.0):
+    clever_args={'min_pixel_value':  minpixel,
+                'max_pixel_value': maxpixel,
+                'nb_batches':100,
+                'batch_size':100,
+                'norm':float(norm_thread[1:]), # eg: 'L2'[1:]=2, 'Linf'[1:]=inf
+                'radius':10.,
+                'pool_factor':10}
+    cl_scores = []
+    model.eval()
+    for data in tqdm(test_loader):
+        clever_dis = clever_score_u(model, data[0][0], **clever_args)
+        cl_scores.append(clever_dis)
+    return np.array(cl_scores)
+
+def clever_score_u(model, x, **args):
+    # set_seeds(1884)
+    classifier = PyTorchClassifier(
+    model=model,
+    clip_values=(args['min_pixel_value'], args['max_pixel_value']),
+    loss=None,
+    optimizer=None,
+    input_shape=(1, 32, 32),
+    nb_classes=10,
+    )
+    res = clever_u(classifier, x.numpy(), 
+                    nb_batches=args['nb_batches'], 
+                    batch_size=args['batch_size'], 
+                    radius=args['radius'], 
+                    norm=args['norm'], 
+                    pool_factor=args['pool_factor'], verbose=False)
+    return res
+
+# def autoattack(model, test_loader, norm_thread, device):
+#     x_test, y_test = [], []
+#     i = 0
+#     for x, y in test_loader:
+#         if i == 0:
+#             x_test = x
+#             y_test = y
+#             i += 1
+#         else:
+#             x_test = torch.cat((x_test, x), 0)
+#             y_test = torch.cat((y_test, y), 0)
+#     #
+#     adversary = AutoAttack(model, norm=norm_thread, eps=8/255, version='standard')
+    # x_adv, y_adv = adversary.run_standard_evaluation(x_test.to(device), y_test.to(device), return_labels=True)
+    # return clean_accuracy(y_test, y_adv)
 
 
 def run_experiment(params: dict, args: argparse.Namespace) -> None:
@@ -208,8 +300,27 @@ def run_experiment(params: dict, args: argparse.Namespace) -> None:
 
     use_cuda = not args.no_cuda and torch.cuda.is_available()
     gpus_per_trial = 1 if use_cuda else 0
-
-    run_trial(config=config, params=params, args=args, num_gpus=gpus_per_trial)
+    if not params.get('n_batches'):
+       run_trial(config=config, params=params, args=args, num_gpus=gpus_per_trial)
+    else:
+        config = {
+            "batch_id": tune.grid_search(list(np.arange(params['n_batches']))),
+            "model_name": params['model_name']
+        }
+        reporter = CLIReporter(
+            parameter_columns=["model_name", "batch_id"],
+            # metric_columns=["round"],
+        )
+        tune.run(
+            tune.with_parameters(
+                run_trial, params=params, args=args, num_gpus=gpus_per_trial
+            ),
+            resources_per_trial={
+                "cpu": args.cpus_per_trial, "gpu": gpus_per_trial},
+            config=config,
+            progress_reporter=reporter,
+            name=args.project_name,
+        )
 
 def main(args: list) -> None:
     """Parse command line args, load training params, and initiate training.

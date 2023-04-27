@@ -1,6 +1,6 @@
 seed: 1380
 
-model_name: Wang2023Better_WRN-28-10 # or Standard
+model_name: Standard # or Standard|Wang2023Better_WRN-28-10|ResNet50, ResNet18
 
 norm_thread: L2 # or Linf
 
@@ -8,6 +8,10 @@ dataset_name: cifar10
 
 batch_size: 32 # put a value that gpu memory can bear
 
-attack: cw #rreplace with 'autoattack' for auto-attack
+attack: fab #rreplace with 'autoattack' for auto-attack
 
-results_root_path: /home/jongn2 # a folder path to save the results
+results_root_path: . # a folder path to save the results
+
+n_batches: 3
+
+id_to_run: 0 #-1 (<0) if run all batches
